@@ -1,0 +1,123 @@
+name: Deploy adera data service to AWS Lambda 
+
+on:
+  push:
+    branches:
+      - prod  
+  pull_request:
+    types:
+      - closed
+
+env:
+  ECR_REPO_NAME: adera-data-service
+  TAG: latest 
+  REGION: us-east-1
+  LAMBDA_FUNCTION_NAME: data-service-function
+  ECR_IMAGE_URI: 278999152470.dkr.ecr.us-east-1.amazonaws.com/adera-data-service:latest 
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2  
+      
+
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v2 
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.REGION }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Create app/env directory
+        run: mkdir -p app/env
+
+      - name: Detect Branch and Write to File
+        run: |
+          # Detect the current branch and create a branch.txt file
+          branch="${{ github.ref }}"
+          branch_name=$(basename "${branch}")
+          echo "$branch_name" > app/env/branch.txt
+          cat app/env/branch.txt  # Debugging: print branch name
+
+      - name: Export GitHub Environment Variables to File
+        run: |
+          echo "BRANCH_NAME=${{ github.ref }}" > app/env/.env
+          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> app/env/.env
+          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> app/env/.env
+          echo "REGION=${{ env.REGION }}" >> app/env/.env
+          echo "LAMBDA_FUNCTION_NAME=${{ env.LAMBDA_FUNCTION_NAME }}" >> app/env/.env
+          echo "PROD_DATABASE_HOST=${{ secrets.PROD_DATABASE_HOST }}" >> app/env/.env
+          echo "PROD_DATABASE_NAME=${{ secrets.PROD_DATABASE_NAME }}" >> app/env/.env
+          echo "PROD_DATABASE_PORT=${{ secrets.PROD_DATABASE_PORT }}" >> app/env/.env
+          echo "PROD_DATABASE_SECRET_NAME=${{ secrets.PROD_DATABASE_SECRET_NAME }}" >> app/env/.env
+          echo "REFRESH_SECRET_KEY=${{ secrets.REFRESH_SECRET_KEY }}" >> app/env/.env
+          echo "API_SECRET_KEY=${{ secrets.API_SECRET_KEY }}" >> app/env/.env
+          echo "ACCESS_TOKEN_EXPIRE_MINUTES=${{ secrets.ACCESS_TOKEN_EXPIRE_MINUTES }}" >> app/env/.env
+          echo "REFRESH_TOKEN_EXPIRE_DAYS=${{ secrets.REFRESH_TOKEN_EXPIRE_DAYS }}" >> app/env/.env
+          echo "ALGORITHM=${{ secrets.ALGORITHM }}" >> app/env/.env
+
+
+          # export secrets to .env file to be accessible inside the container
+
+      - name: Build, Tag, and Push Image to ECR
+        id: build-image
+        run: |
+          # Ensure ECR_REGISTRY is correctly set from login-ecr step output
+          ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}
+          IMAGE_URI=$ECR_REGISTRY/${{ env.ECR_REPO_NAME }}:${{ env.TAG }}
+
+          # Check if the registry is set correctly
+          if [ -z "$ECR_REGISTRY" ]; then
+            echo "ECR registry not found, aborting build."
+            exit 1
+          fi
+
+          echo "Building image: $IMAGE_URI"
+          docker build -t $IMAGE_URI -f docker/Dockerfile.lambda .
+          docker push $IMAGE_URI
+
+          echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
+      - name: Wait before Lambda update
+        run: |
+          echo "Waiting for image to propagate in ECR..."
+          sleep 10
+
+      - name: Create or Update Lambda Function
+        run: |
+          IMAGE_URI=${{ steps.build-image.outputs.image_uri }}
+          FUNCTION_NAME=${{ env.LAMBDA_FUNCTION_NAME }}
+
+          if aws lambda get-function --function-name $FUNCTION_NAME > /dev/null 2>&1; then
+            echo "Updating existing Lambda function: $FUNCTION_NAME"
+            aws lambda update-function-code \
+              --function-name $FUNCTION_NAME \
+              --image-uri $IMAGE_URI
+          else
+            echo "Creating new Lambda function: $FUNCTION_NAME"
+            aws lambda create-function \
+              --function-name $FUNCTION_NAME \
+              --package-type Image \
+              --code ImageUri=$IMAGE_URI \
+              --role ${{ secrets.LAMBDA_EXECUTION_ROLE_ARN }} \
+              --timeout 30 \
+              --memory-size 512 \
+              --architectures x86_64
+          fi
+
+      - name: Output Lambda Function URL
+        run: |
+          echo "Fetching Lambda function URL..."
+          aws lambda get-function-url-config --function-name ${{ env.LAMBDA_FUNCTION_NAME }} || echo "URL not configured."
+
+      - name: Log Deployment Success
+        run: echo "✅ Lambda deployment completed successfully!"

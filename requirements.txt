@@ -1,0 +1,33 @@
+# Core
+numpy
+pandas
+scikit-learn
+matplotlib
+seaborn
+joblib
+
+# ML & Anomaly Detection
+xgboost
+lightgbm
+tensorflow
+keras
+torch
+statsmodels
+
+# Optional: geospatial anomaly detection
+folium
+geopandas
+shapely
+
+# FastAPI APIs or MLOps
+fastapi
+uvicorn
+boto3
+psycopg2-binary
+python-dotenv
+
+# Notebook & Dev
+jupyter
+ipywidgets
+tqdm
+rich
