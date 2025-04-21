@@ -1,0 +1,31 @@
+data/
+logs
+artifacts/
+# actions-runner/
+# Ignore Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+data-backup-march11-2025/*
+# Ignore virtual environment directories
+venv/
+env/
+# Ignore Docker-related files
+**/.docker/
+docker-compose.override.yml
+# Ignore Minikube and kubectl files
+.kube/
+# Ignore temporary build files
+build/
+dist/
+*.tar.gz
+*.zip
+# Ignore log files
+*.log
+# Ignore IDE files
+.idea/
+.vscode/
+*.swp
+# Ignore CI/CD related files
+.cache/
